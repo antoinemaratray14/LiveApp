@@ -23,7 +23,7 @@ import streamlit as st
 # Page config
 # =========================
 st.set_page_config(
-    page_title="StatsBomb Live Match Analyser",
+    page_title="HudlStatsbomb Live Match Analyser",
     page_icon="⚽",
     layout="wide",
 )
@@ -745,7 +745,7 @@ if "last_fig"     not in st.session_state: st.session_state["last_fig"]     = No
 # =========================
 # Main panel
 # =========================
-st.title("⚽ StatsBomb Live Match Analyser")
+st.title("⚽ HudlStatsbomb Live Match Analyser")
 
 if run_btn or refresh_btn:
     token = st.session_state.get("live_token", "")
