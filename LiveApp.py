@@ -5,7 +5,6 @@ Created on Thu Mar 12 21:04:53 2026
 
 @author: antoinemaratray
 """
-
 import io
 import sys
 import numpy as np
@@ -53,40 +52,66 @@ PLAYER_MAP_URL = "https://data.statsbomb.com/api/v1/player-mapping"
 # =========================
 # Tuning constants
 # =========================
-MIN_PASSES_PAIR       = 2
-MIN_TOUCHES_NODE      = 3
-NODE_SIZE_MIN         = 120
-NODE_SIZE_MAX         = 1600
-EDGE_WIDTH_MIN        = 0.6
-EDGE_WIDTH_MAX        = 6.0
-CARRY_MIN_DIST        = 5.0
-CARRY_MIN_DX          = 2.0
-CARRY_MAX_GAP_SECONDS = 12
-BACKWARD_DAMPING      = 0.25
-SMALL_NEG_CLIP        = 0.002
-PROGRESSIVE_DX        = 10.0
-PROGRESSIVE_BONUS     = 1.35
-NONPROG_POS_SCALE     = 1.00
-SWING_WINDOW_MIN      = 3
-SWING_MIN_XT_CREATED  = 0.08
-SWING_MIN_GAP_MIN     = 8
-SWING_MAX_LABELS_PER_TM = 3
-BINS                  = (16, 12)
-SMOOTH_SIGMA          = 0.8
-MIN_EVENTS_PER_CELL   = 2
-MASK_QUANTILE         = 0.35
-PERC_CLIP             = 98
-GAMMA                 = 0.65
-HEATMAP_ORIGIN        = "start"
-DEF_EVENTS            = {"ball-recovery","block","clearance","dispossessed","duel","foul-committed","interception"}
-DEF_BINS_X            = 6
-DEF_BINS_Y            = 5
-PITCH_X               = 120.0
-PITCH_Y               = 80.0
+MIN_PASSES_PAIR          = 2
+MIN_TOUCHES_NODE         = 3
+NODE_SIZE_MIN            = 120
+NODE_SIZE_MAX            = 1600
+EDGE_WIDTH_MIN           = 0.6
+EDGE_WIDTH_MAX           = 6.0
+CARRY_MIN_DIST           = 5.0
+CARRY_MIN_DX             = 2.0
+CARRY_MAX_GAP_SECONDS    = 12
+BACKWARD_DAMPING         = 0.25
+SMALL_NEG_CLIP           = 0.002
+PROGRESSIVE_DX           = 10.0
+PROGRESSIVE_BONUS        = 1.35
+NONPROG_POS_SCALE        = 1.00
+SWING_WINDOW_MIN         = 3
+SWING_MIN_XT_CREATED     = 0.08
+SWING_MIN_GAP_MIN        = 8
+SWING_MAX_LABELS_PER_TM  = 3
+BINS                     = (16, 12)
+SMOOTH_SIGMA             = 0.8
+MIN_EVENTS_PER_CELL      = 2
+MASK_QUANTILE            = 0.35
+PERC_CLIP                = 98
+GAMMA                    = 0.65
+HEATMAP_ORIGIN           = "start"
+DEF_EVENTS               = {"ball-recovery","block","clearance","dispossessed","duel","foul-committed","interception"}
+DEF_BINS_X               = 6
+DEF_BINS_Y               = 5
+PITCH_X                  = 120.0
+PITCH_Y                  = 80.0
 
 # =========================
 # GQL queries
 # =========================
+QUERY_COMP_SEASONS = """
+query ExampleQuery {
+  live_competition_season {
+    season_name
+    competition_name
+    competition_id
+    season_id
+  }
+}
+"""
+
+QUERY_MATCHES = """
+query LiveMatches($competition_id: Int!, $season_id: Int!) {
+  live_match(where: {
+    competition_id: {_eq: $competition_id},
+    season_id:      {_eq: $season_id}
+  }) {
+    match_id
+    match_home_team_id
+    match_home_team_name
+    match_away_team_id
+    match_away_team_name
+  }
+}
+"""
+
 QUERY_TEAMS = """
 query LiveMatch($match_id: Int!) {
   live_match(where: {match_id: {_eq: $match_id}}) {
@@ -95,6 +120,7 @@ query LiveMatch($match_id: Int!) {
   }
 }
 """
+
 QUERY_EVENTS = """
 query LiveMatchEvents($match_id: Int!, $m_start: smallint!, $m_end: smallint!) {
   live_match_event(
@@ -116,59 +142,23 @@ query LiveMatchEvents($match_id: Int!, $m_start: smallint!, $m_end: smallint!) {
 """
 
 # =========================
-# Sidebar UI
+# Session state init
 # =========================
-with st.sidebar:
-    st.title("⚽ Match Analyser")
-
-    st.header("🔐 Authentication")
-    client_id     = st.text_input("Client ID",     type="password")
-    client_secret = st.text_input("Client Secret", type="password")
-
-    fetch_token_btn = st.button("Fetch Token", use_container_width=True)
-    if fetch_token_btn:
-        if not client_id or not client_secret:
-            st.error("Enter both Client ID and Client Secret.")
-        else:
-            with st.spinner("Fetching token…"):
-                try:
-                    r = requests.post(
-                        TOKEN_URL,
-                        json={"client_id": client_id, "client_secret": client_secret},
-                        headers={"content-type": "application/json"},
-                        timeout=15,
-                    )
-                    r.raise_for_status()
-                    tok = r.json().get("access_token", "")
-                    if tok:
-                        st.session_state["live_token"] = tok
-                        st.success("✅ Token acquired (valid 24 h)")
-                    else:
-                        st.error("No access_token in response.")
-                except Exception as e:
-                    st.error(f"Token fetch failed: {e}")
-
-    token_status = "✅ Token loaded" if st.session_state.get("live_token") else "⚠️ No token"
-    st.caption(token_status)
-
-    st.divider()
-    st.header("📊 Data API Credentials")
-    data_user = st.text_input("Username", key="data_user")
-    data_pass = st.text_input("Password", type="password", key="data_pass")
-
-    st.divider()
-    st.header("⚙️ Match Settings")
-    match_id       = st.number_input("Match ID",       value=1370892, step=1)
-    col1, col2     = st.columns(2)
-    start_min      = col1.number_input("Start min", value=0,  min_value=0,  max_value=200)
-    end_min        = col2.number_input("End min",   value=94, min_value=0,  max_value=200)
-    competition_id = st.number_input("Competition ID", value=38,  step=1)
-    season_id      = st.number_input("Season ID",      value=318, step=1)
-    enable_carries = st.checkbox("Enable Carries", value=True)
-
-    st.divider()
-    run_btn     = st.button("▶ Run Analysis",  use_container_width=True, type="primary")
-    refresh_btn = st.button("🔄 Refresh Data", use_container_width=True)
+for _k, _v in {
+    "live_token":    "",
+    "match_data":    None,
+    "cache_bust":    0,
+    "last_fig":      None,
+    # credential memory
+    "saved_client_id":     "",
+    "saved_client_secret": "",
+    "saved_data_user":     "",
+    "saved_data_pass":     "",
+    # match-picker cache
+    "comp_seasons":        None,
+}.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
 
 # =========================
 # Helpers
@@ -177,6 +167,19 @@ def gql(query, variables, token):
     r = requests.post(
         LIVE_ENDPOINT,
         json={"query": query, "variables": variables},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if "errors" in data:
+        raise RuntimeError(data["errors"])
+    return data["data"]
+
+def gql_no_vars(query, token):
+    r = requests.post(
+        LIVE_ENDPOINT,
+        json={"query": query},
         headers={"Authorization": f"Bearer {token}"},
         timeout=30,
     )
@@ -252,6 +255,16 @@ def _smooth_gaussian(A, sigma):
 # =========================
 # Data fetching (cached)
 # =========================
+@st.cache_data(show_spinner=False)
+def fetch_comp_seasons(token):
+    data = gql_no_vars(QUERY_COMP_SEASONS, token)
+    return data.get("live_competition_season", [])
+
+@st.cache_data(show_spinner=False)
+def fetch_matches(competition_id, season_id, token):
+    data = gql(QUERY_MATCHES, {"competition_id": int(competition_id), "season_id": int(season_id)}, token)
+    return data.get("live_match", [])
+
 @st.cache_data(show_spinner=False)
 def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
                      enable_carries, token, data_user, data_pass, _cache_bust=0):
@@ -435,7 +448,7 @@ def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
     )
 
 # =========================
-# Plotting helpers
+# Plotting helpers  (unchanged)
 # =========================
 def _hist_xt_and_counts(df_, team_id, away_id, xcol="end_x", ycol="end_y", bins=BINS):
     v = df_[df_[xcol].notna() & df_[ycol].notna()].copy()
@@ -499,7 +512,7 @@ def build_pass_network(df, passes, player_name_map, team_id, away_id):
     return nodes, edges
 
 # =========================
-# Draw functions
+# Draw functions  (unchanged)
 # =========================
 def draw_shot_map(ax, team_shots, team_name, team_id, away_id):
     pitch = Pitch(pitch_type="statsbomb", pitch_color="white", line_color="black", linewidth=1.25)
@@ -640,7 +653,7 @@ def annotate_swings(ax, team_minute, xt_actions, team_id, team_name, start_min, 
                 bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.75), zorder=20)
 
 # =========================
-# Build full figure
+# Build full figure  (unchanged)
 # =========================
 def build_figure(d, start_min, end_min):
     plt.rcParams["figure.facecolor"] = "white"
@@ -735,12 +748,189 @@ def build_figure(d, start_min, end_min):
     return fig
 
 # =========================
-# Session state init
+# Sidebar
 # =========================
-if "live_token"   not in st.session_state: st.session_state["live_token"]   = ""
-if "match_data"   not in st.session_state: st.session_state["match_data"]   = None
-if "cache_bust"   not in st.session_state: st.session_state["cache_bust"]   = 0
-if "last_fig"     not in st.session_state: st.session_state["last_fig"]     = None
+with st.sidebar:
+    st.title("⚽ Match Analyser")
+
+    # ── Authentication ──────────────────────────────────────────
+    st.header("🔐 Authentication")
+
+    remember_auth = st.checkbox(
+        "Remember credentials this session",
+        value=bool(st.session_state["saved_client_id"]),
+        key="remember_auth",
+    )
+
+    client_id = st.text_input(
+        "Client ID",
+        value=st.session_state["saved_client_id"],
+        type="password",
+        key="input_client_id",
+    )
+    client_secret = st.text_input(
+        "Client Secret",
+        value=st.session_state["saved_client_secret"],
+        type="password",
+        key="input_client_secret",
+    )
+
+    fetch_token_btn = st.button("Fetch Token", use_container_width=True)
+    if fetch_token_btn:
+        if not client_id or not client_secret:
+            st.error("Enter both Client ID and Client Secret.")
+        else:
+            with st.spinner("Fetching token…"):
+                try:
+                    r = requests.post(
+                        TOKEN_URL,
+                        json={"client_id": client_id, "client_secret": client_secret},
+                        headers={"content-type": "application/json"},
+                        timeout=15,
+                    )
+                    r.raise_for_status()
+                    tok = r.json().get("access_token", "")
+                    if tok:
+                        st.session_state["live_token"] = tok
+                        # Save credentials if checkbox is ticked
+                        if remember_auth:
+                            st.session_state["saved_client_id"]     = client_id
+                            st.session_state["saved_client_secret"] = client_secret
+                        else:
+                            st.session_state["saved_client_id"]     = ""
+                            st.session_state["saved_client_secret"] = ""
+                        st.success("✅ Token acquired (valid 24 h)")
+                        # Pre-fetch competition/season list right away
+                        st.session_state["comp_seasons"] = None
+                    else:
+                        st.error("No access_token in response.")
+                except Exception as e:
+                    st.error(f"Token fetch failed: {e}")
+
+    token_status = "✅ Token loaded" if st.session_state.get("live_token") else "⚠️ No token"
+    st.caption(token_status)
+
+    st.divider()
+
+    # ── Data API credentials ─────────────────────────────────────
+    st.header("📊 Data API Credentials")
+
+    remember_data = st.checkbox(
+        "Remember credentials this session",
+        value=bool(st.session_state["saved_data_user"]),
+        key="remember_data",
+    )
+
+    data_user = st.text_input(
+        "Username",
+        value=st.session_state["saved_data_user"],
+        key="data_user",
+    )
+    data_pass = st.text_input(
+        "Password",
+        value=st.session_state["saved_data_pass"],
+        type="password",
+        key="data_pass",
+    )
+
+    # Persist data creds when either field changes
+    if remember_data:
+        st.session_state["saved_data_user"] = data_user
+        st.session_state["saved_data_pass"] = data_pass
+    else:
+        # Only wipe if the user explicitly unchecked
+        if not st.session_state.get("remember_data"):
+            st.session_state["saved_data_user"] = ""
+            st.session_state["saved_data_pass"] = ""
+
+    st.divider()
+
+    # ── Match picker ─────────────────────────────────────────────
+    st.header("🏆 Match Picker")
+
+    token = st.session_state.get("live_token", "")
+    match_id         = None
+    competition_id   = None
+    season_id        = None
+
+    if not token:
+        st.info("Fetch a token above to enable the match picker.")
+    else:
+        # Load competition/season catalogue once per token
+        if st.session_state["comp_seasons"] is None:
+            with st.spinner("Loading competitions…"):
+                try:
+                    st.session_state["comp_seasons"] = fetch_comp_seasons(token)
+                except Exception as e:
+                    st.error(f"Failed to load competitions: {e}")
+
+        cs = st.session_state.get("comp_seasons") or []
+
+        if cs:
+            cs_df = pd.DataFrame(cs)
+
+            # 1️⃣  Season
+            seasons_sorted = sorted(cs_df["season_name"].unique(), reverse=True)
+            sel_season = st.selectbox("Season", seasons_sorted)
+
+            # 2️⃣  Competition (filtered by season)
+            comps_for_season = cs_df[cs_df["season_name"] == sel_season]["competition_name"].unique()
+            comps_sorted = sorted(comps_for_season)
+            sel_comp = st.selectbox("Competition", comps_sorted)
+
+            # Resolve IDs
+            row = cs_df[
+                (cs_df["season_name"] == sel_season) &
+                (cs_df["competition_name"] == sel_comp)
+            ].iloc[0]
+            competition_id = int(row["competition_id"])
+            season_id      = int(row["season_id"])
+
+            # 3️⃣  Load matches for this comp/season
+            try:
+                matches_raw = fetch_matches(competition_id, season_id, token)
+            except Exception as e:
+                st.error(f"Failed to load matches: {e}")
+                matches_raw = []
+
+            if matches_raw:
+                m_df = pd.DataFrame(matches_raw)
+
+                # 4️⃣  Home team
+                home_teams = sorted(m_df["match_home_team_name"].unique())
+                sel_home = st.selectbox("Home team", home_teams)
+
+                # 5️⃣  Away team (only those who have played home vs sel_home)
+                away_teams = sorted(
+                    m_df[m_df["match_home_team_name"] == sel_home]["match_away_team_name"].unique()
+                )
+                if away_teams:
+                    sel_away = st.selectbox("Away team", away_teams)
+                    # Resolve match_id
+                    matched = m_df[
+                        (m_df["match_home_team_name"] == sel_home) &
+                        (m_df["match_away_team_name"] == sel_away)
+                    ]
+                    if not matched.empty:
+                        match_id = int(matched.iloc[0]["match_id"])
+                        st.caption(f"Match ID: **{match_id}**")
+                else:
+                    st.warning("No matches found for this home team.")
+            else:
+                st.warning("No matches found for this competition/season.")
+
+    st.divider()
+
+    # ── Match settings ───────────────────────────────────────────
+    st.header("⚙️ Match Settings")
+    col1, col2 = st.columns(2)
+    start_min      = col1.number_input("Start min", value=0,   min_value=0, max_value=200)
+    end_min        = col2.number_input("End min",   value=94,  min_value=0, max_value=200)
+    enable_carries = st.checkbox("Enable Carries", value=True)
+
+    st.divider()
+    run_btn     = st.button("▶ Run Analysis",  use_container_width=True, type="primary")
+    refresh_btn = st.button("🔄 Refresh Data", use_container_width=True)
 
 # =========================
 # Main panel
@@ -751,11 +941,13 @@ if run_btn or refresh_btn:
     token = st.session_state.get("live_token", "")
     if not token:
         st.error("No bearer token — use 'Fetch Token' in the sidebar first.")
+    elif match_id is None:
+        st.error("Please select a match using the Match Picker in the sidebar.")
     elif not data_user or not data_pass:
         st.error("Enter your StatsBomb Data API credentials in the sidebar.")
     else:
         if refresh_btn:
-            st.session_state["cache_bust"] += 1   # busts the cache
+            st.session_state["cache_bust"] += 1
 
         with st.spinner("Fetching match data…"):
             try:
@@ -783,10 +975,8 @@ if run_btn or refresh_btn:
 if st.session_state.get("last_fig") is not None:
     d = st.session_state["match_data"]
     st.subheader(f"{d['home_name']} {d['goals_home']} – {d['goals_away']} {d['away_name']}")
-
     st.pyplot(st.session_state["last_fig"], use_container_width=True)
 
-    # Download button
     buf = io.BytesIO()
     st.session_state["last_fig"].savefig(buf, format="png", dpi=150, bbox_inches="tight")
     buf.seek(0)
