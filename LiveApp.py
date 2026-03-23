@@ -874,15 +874,19 @@ with st.sidebar:
             sel_season = st.selectbox("Season", seasons_sorted)
 
             # 2️⃣  Competition (filtered by season)
-            comps_for_season = cs_df[cs_df["season_name"] == sel_season]["competition_name"].unique()
-            comps_sorted = sorted(comps_for_season)
-            sel_comp = st.selectbox("Competition", comps_sorted)
+            # Build unique labels — append competition_id in brackets if name clashes
+            season_rows = cs_df[cs_df["season_name"] == sel_season].copy()
+            name_counts = season_rows["competition_name"].value_counts()
+            def _comp_label(r):
+                if name_counts[r["competition_name"]] > 1:
+                    return f"{r['competition_name']} (ID {r['competition_id']})"
+                return r["competition_name"]
+            season_rows["comp_label"] = season_rows.apply(_comp_label, axis=1)
+            comp_labels = sorted(season_rows["comp_label"].unique())
+            sel_comp_label = st.selectbox("Competition", comp_labels)
 
-            # Resolve IDs
-            row = cs_df[
-                (cs_df["season_name"] == sel_season) &
-                (cs_df["competition_name"] == sel_comp)
-            ].iloc[0]
+            # Resolve IDs from the unique label
+            row = season_rows[season_rows["comp_label"] == sel_comp_label].iloc[0]
             competition_id = int(row["competition_id"])
             season_id      = int(row["season_id"])
 
