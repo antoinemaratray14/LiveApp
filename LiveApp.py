@@ -389,10 +389,20 @@ def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
     xt_actions["player_name"] = xt_actions["player_id"].apply(
         lambda v: player_name_map.get(int(v), f"ID {int(v)}") if pd.notna(v) else "Unknown"
     )
+
+    # Force numeric types to prevent object-dtype cumsum errors
+    for col in ["xT_added", "xT_start", "xT_end"]:
+        xt_actions[col] = pd.to_numeric(xt_actions[col], errors="coerce").fillna(0.0)
+
     xt_actions["xT_created"] = xt_actions["xT_added"].clip(lower=0)
     xt_actions["xT_lost"]    = (-xt_actions["xT_added"].clip(upper=0))
 
     # --- Aggregations ---
+    team_minute = (xt_actions.groupby(["team","minute"], as_index=False)
+                   .agg(xT_net=("xT_added","sum"), xT_created=("xT_created","sum"))
+                   .sort_values(["team","minute"]))
+
+    # Force numeric before cumsum
     team_minute["xT_net"]     = pd.to_numeric(team_minute["xT_net"],     errors="coerce").fillna(0.0)
     team_minute["xT_created"] = pd.to_numeric(team_minute["xT_created"], errors="coerce").fillna(0.0)
     team_minute["cum_xT_net"]     = team_minute.groupby("team")["xT_net"].cumsum()
@@ -429,6 +439,10 @@ def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
     shots = shots.sort_values(["team_id","minute_f","timestamp"], na_position="last")
     shots["cum_xG"] = shots.groupby("team")["xg"].cumsum()
 
+    xg_minute = (shots.groupby(["team","minute"], as_index=False)["xg"]
+                 .sum().sort_values(["team","minute"]))
+
+    # Force numeric before cumsum
     xg_minute["xg"] = pd.to_numeric(xg_minute["xg"], errors="coerce").fillna(0.0)
     xg_minute["cum_xG"] = xg_minute.groupby("team")["xg"].cumsum()
 
@@ -446,7 +460,7 @@ def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
     )
 
 # =========================
-# Plotting helpers  (unchanged)
+# Plotting helpers
 # =========================
 def _hist_xt_and_counts(df_, team_id, away_id, xcol="end_x", ycol="end_y", bins=BINS):
     v = df_[df_[xcol].notna() & df_[ycol].notna()].copy()
@@ -510,7 +524,7 @@ def build_pass_network(df, passes, player_name_map, team_id, away_id):
     return nodes, edges
 
 # =========================
-# Draw functions  (unchanged)
+# Draw functions
 # =========================
 def draw_shot_map(ax, team_shots, team_name, team_id, away_id):
     pitch = Pitch(pitch_type="statsbomb", pitch_color="white", line_color="black", linewidth=1.25)
@@ -651,7 +665,7 @@ def annotate_swings(ax, team_minute, xt_actions, team_id, team_name, start_min, 
                 bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.75), zorder=20)
 
 # =========================
-# Build full figure  (unchanged)
+# Build full figure
 # =========================
 def build_figure(d, start_min, end_min):
     plt.rcParams["figure.facecolor"] = "white"
@@ -790,7 +804,6 @@ with st.sidebar:
                     tok = r.json().get("access_token", "")
                     if tok:
                         st.session_state["live_token"] = tok
-                        # Save credentials if checkbox is ticked
                         if remember_auth:
                             st.session_state["saved_client_id"]     = client_id
                             st.session_state["saved_client_secret"] = client_secret
@@ -798,7 +811,6 @@ with st.sidebar:
                             st.session_state["saved_client_id"]     = ""
                             st.session_state["saved_client_secret"] = ""
                         st.success("✅ Token acquired (valid 24 h)")
-                        # Pre-fetch competition/season list right away
                         st.session_state["comp_seasons"] = None
                     else:
                         st.error("No access_token in response.")
@@ -831,12 +843,10 @@ with st.sidebar:
         key="data_pass",
     )
 
-    # Persist data creds when either field changes
     if remember_data:
         st.session_state["saved_data_user"] = data_user
         st.session_state["saved_data_pass"] = data_pass
     else:
-        # Only wipe if the user explicitly unchecked
         if not st.session_state.get("remember_data"):
             st.session_state["saved_data_user"] = ""
             st.session_state["saved_data_pass"] = ""
@@ -854,7 +864,6 @@ with st.sidebar:
     if not token:
         st.info("Fetch a token above to enable the match picker.")
     else:
-        # Load competition/season catalogue once per token
         if st.session_state["comp_seasons"] is None:
             with st.spinner("Loading competitions…"):
                 try:
@@ -867,12 +876,9 @@ with st.sidebar:
         if cs:
             cs_df = pd.DataFrame(cs)
 
-            # 1️⃣  Season
             seasons_sorted = sorted(cs_df["season_name"].unique(), reverse=True)
             sel_season = st.selectbox("Season", seasons_sorted)
 
-            # 2️⃣  Competition (filtered by season)
-            # Build unique labels — append competition_id in brackets if name clashes
             season_rows = cs_df[cs_df["season_name"] == sel_season].copy()
             name_counts = season_rows["competition_name"].value_counts()
             def _comp_label(r):
@@ -883,12 +889,10 @@ with st.sidebar:
             comp_labels = sorted(season_rows["comp_label"].unique())
             sel_comp_label = st.selectbox("Competition", comp_labels)
 
-            # Resolve IDs from the unique label
             row = season_rows[season_rows["comp_label"] == sel_comp_label].iloc[0]
             competition_id = int(row["competition_id"])
             season_id      = int(row["season_id"])
 
-            # 3️⃣  Load matches for this comp/season
             try:
                 matches_raw = fetch_matches(competition_id, season_id, token)
             except Exception as e:
@@ -898,17 +902,14 @@ with st.sidebar:
             if matches_raw:
                 m_df = pd.DataFrame(matches_raw)
 
-                # 4️⃣  Home team
                 home_teams = sorted(m_df["match_home_team_name"].unique())
                 sel_home = st.selectbox("Home team", home_teams)
 
-                # 5️⃣  Away team (only those who have played home vs sel_home)
                 away_teams = sorted(
                     m_df[m_df["match_home_team_name"] == sel_home]["match_away_team_name"].unique()
                 )
                 if away_teams:
                     sel_away = st.selectbox("Away team", away_teams)
-                    # Resolve match_id
                     matched = m_df[
                         (m_df["match_home_team_name"] == sel_home) &
                         (m_df["match_away_team_name"] == sel_away)
