@@ -393,9 +393,8 @@ def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
     xt_actions["xT_lost"]    = (-xt_actions["xT_added"].clip(upper=0))
 
     # --- Aggregations ---
-    team_minute = (xt_actions.groupby(["team","minute"], as_index=False)
-                   .agg(xT_net=("xT_added","sum"), xT_created=("xT_created","sum"))
-                   .sort_values(["team","minute"]))
+    team_minute["xT_net"]     = pd.to_numeric(team_minute["xT_net"],     errors="coerce").fillna(0.0)
+    team_minute["xT_created"] = pd.to_numeric(team_minute["xT_created"], errors="coerce").fillna(0.0)
     team_minute["cum_xT_net"]     = team_minute.groupby("team")["xT_net"].cumsum()
     team_minute["cum_xT_created"] = team_minute.groupby("team")["xT_created"].cumsum()
 
@@ -430,8 +429,7 @@ def fetch_match_data(match_id, start_min, end_min, competition_id, season_id,
     shots = shots.sort_values(["team_id","minute_f","timestamp"], na_position="last")
     shots["cum_xG"] = shots.groupby("team")["xg"].cumsum()
 
-    xg_minute = (shots.groupby(["team","minute"], as_index=False)["xg"]
-                 .sum().sort_values(["team","minute"]))
+    xg_minute["xg"] = pd.to_numeric(xg_minute["xg"], errors="coerce").fillna(0.0)
     xg_minute["cum_xG"] = xg_minute.groupby("team")["xg"].cumsum()
 
     goals_home = int(shots[(shots["team_id"] == home_id) & shots["is_goal"]].shape[0])
